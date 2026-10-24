@@ -1,9 +1,9 @@
 # CSCI 645 HW2: Imitation Learning for Robot Pick-and-Place
 
-**Task:** pick-and-place with a Franka Panda. The robot picks a cube up from one side of the table,
-carries it over, puts it down on a target spot on the **other side**, and lets go. The environment is
-MuJoCo Playground's `PandaPickCube` (JAX/MJX backend, state observations) with **only the target changed**
-(see *Environment* below).
+**Task:** pick-and-place with a Franka Panda. The robot picks a cube up from the table, swings its arm
+**45–60° around its base** (seen from the top), puts the cube down on a target spot, and lets go. The
+environment is MuJoCo Playground's `PandaPickCube` (JAX/MJX backend, state observations) with only the
+cube/target layout and the episode length changed (see *Environment* below).
 **Teacher:** scripted pick-and-place expert (IK + gravity-compensated joint targets).
 **Student:** Diffusion Policy (state-based, 1-D temporal conditional U-Net, DDPM).
 **Experiment (Option A):** dataset quantity, 25 vs 50 vs 100 demonstrations (nested subsets), 3 training seeds each.
@@ -70,11 +70,19 @@ python code/analyze.py                                    # table + figures
 ## Design details
 
 **Environment.** A subclass of Playground's `PandaPickCube` (`code/hw2/envs.py`). Unchanged from
-PandaPickCube: robot, cube, physics, control step 0.02 s (4 physics substeps of 0.005 s), observations,
-actions, and the cube's start positions (x = 0.5 ± 0.2 m, y = ±0.2 m). **Changed:**
-- **Target:** a spot on the table at the cube's resting height. Its x is 0.5 ± 0.2 m, and its y is
-  0.05–0.2 m from the middle, on the *opposite* side of y = 0 from the cube.
-- **Episode length:** 250 steps (5 s) instead of 150, because placing and releasing take longer than lifting.
+PandaPickCube: robot, cube, physics, control step 0.02 s (4 physics substeps of 0.005 s), observations
+and actions. **Changed:**
+- **Layout:** the cube start and the target spot are both on the table. They are placed around the
+  robot base, which sits at the origin; positions below are seen from the top:
+  - both spots are within 60° left or right of straight ahead (+x),
+  - both are 0.40–0.60 m from the base, a comfortable reach for a top-down grasp (the Panda's maximum
+    reach is about 0.85 m),
+  - the angle between them is **45–60°** in a random direction, so the arm swings well across the
+    workspace and the spots end up 0.31–0.60 m apart.
+
+  The sampler is `pick_and_place_from_uniforms`, and these limits are unit-tested.
+- **Episode length:** 250 steps (5 s) instead of 150, because carrying, placing and releasing take
+  longer than lifting.
 - **First observation:** after `reset()` we run `mjx.forward`. Upstream `reset()` skips this step,
   so the gripper and cube positions in the first observation would otherwise all be 0. It does not
   change the physics.

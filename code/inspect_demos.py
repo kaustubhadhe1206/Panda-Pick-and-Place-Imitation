@@ -20,6 +20,7 @@ import numpy as np
 
 import hw2  # noqa: F401
 from hw2 import plotting, utils
+from hw2.envs import turn_angle_deg
 from hw2.phases import PHASE_NAMES
 from hw2.rollout import FAILURE_MODES, SUCCESS_THRESHOLD, label_failure_modes
 VIDEO_FPS = 25          # we keep every 2nd state of a 50 Hz episode, so 25 fps is real time
@@ -63,6 +64,9 @@ def compute_dataset_stats(demos):
       "final_dist_m_successful": mean_std_min_max(demos["dist"][successful, -1]),
       "failure_modes": {mode: int((failure_modes == mode).sum())
                         for mode in FAILURE_MODES if (failure_modes == mode).any()},
+      "turn_angle_deg": mean_std_min_max(turn_angle_deg(demos["box_init"][:, :2], demos["target_pos"][:, :2])),
+      "pick_to_place_distance_m": mean_std_min_max(
+          np.linalg.norm(demos["target_pos"][:, :2] - demos["box_init"][:, :2], axis=1)),
       "box_init_range": {"min": demos["box_init"].min(0).tolist(), "max": demos["box_init"].max(0).tolist()},
       "target_range": {"min": demos["target_pos"].min(0).tolist(), "max": demos["target_pos"].max(0).tolist()},
       "action_abs_mean_per_dim": np.abs(successful_actions).mean(axis=(0, 1)).tolist(),
@@ -83,12 +87,13 @@ def plot_initial_conditions(demos, path):
                      color=color, label=f"box start ({label})")
   ax_top.scatter(demos["target_pos"][:, 0], demos["target_pos"][:, 1], s=22, marker="^",
                  facecolors="none", edgecolors=plotting.COLORS[2], label="target")
+  ax_top.scatter([0.0], [0.0], s=60, marker="s", color=plotting.TEXT_COLOR, label="robot base")
   ax_top.set(xlabel="x [m]", ylabel="y [m]", title="Initial conditions (top-down)", aspect="equal")
   ax_top.legend(loc="upper left", bbox_to_anchor=(1.0, 1.0), fontsize=8)
-  carry_distance = np.linalg.norm(demos["target_pos"][:, :2] - demos["box_init"][:, :2], axis=1)
-  ax_height.hist(carry_distance, bins=15, color=plotting.COLORS[2], edgecolor="white", linewidth=1)
-  ax_height.set(xlabel="distance from cube start to target spot [m]", ylabel="episodes",
-                title="How far the cube has to be carried")
+  turn_angles = turn_angle_deg(demos["box_init"][:, :2], demos["target_pos"][:, :2])
+  ax_height.hist(turn_angles, bins=15, color=plotting.COLORS[2], edgecolor="white", linewidth=1)
+  ax_height.set(xlabel="angle the arm swings around its base, pick -> place [deg]", ylabel="episodes",
+                title="How far the arm has to turn (seen from the top)")
   fig.tight_layout()
   return plotting.save_figure(fig, path)
 
@@ -238,6 +243,7 @@ def main():
   print("\n==== DEMO STATS (paste this back) ====")
   print(json.dumps({key: stats[key] for key in [
       "num_trajectories", "num_successful", "success_fraction", "episode_length_steps",
+      "turn_angle_deg", "pick_to_place_distance_m",
       "first_success_step_successful", "settle_step_successful", "gripper_path_length_m_successful",
       "final_dist_m_successful", "failure_modes", "action_saturation_fraction"]}, indent=2))
   print("figures ->", out_dir)

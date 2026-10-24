@@ -74,6 +74,29 @@ class MoveToTargetController:
     return actions
 
 
+def test_pick_and_place_layout():
+  """The arm must swing 45-60 degrees between pick and place, and both spots must be in easy reach."""
+  import itertools
+  from hw2.envs import (MAX_ABS_ANGLE_DEG, MAX_RADIUS, MAX_TURN_DEG, MIN_RADIUS, MIN_TURN_DEG,
+                        pick_and_place_from_uniforms, turn_angle_deg)
+  random_draws = np.random.default_rng(0).random((5, 100_000))
+  extreme_corners = np.array(list(itertools.product([0.0, 1.0 - 1e-9], repeat=5))).T
+  uniforms = np.concatenate([random_draws, extreme_corners], axis=1)
+  pick_xy, place_xy = pick_and_place_from_uniforms(uniforms)
+  pick_xy, place_xy = pick_xy.T, place_xy.T   # -> (N, 2)
+
+  turn = turn_angle_deg(pick_xy, place_xy)
+  assert turn.min() >= MIN_TURN_DEG - 1e-6 and turn.max() <= MAX_TURN_DEG + 1e-6, (turn.min(), turn.max())
+  for spots in (pick_xy, place_xy):
+    radius = np.linalg.norm(spots, axis=1)
+    angle = np.degrees(np.arctan2(spots[:, 1], spots[:, 0]))
+    assert radius.min() >= MIN_RADIUS - 1e-9 and radius.max() <= MAX_RADIUS + 1e-9
+    assert np.abs(angle).max() <= MAX_ABS_ANGLE_DEG + 1e-6
+  signed_turn = (np.arctan2(place_xy[:, 1], place_xy[:, 0]) - np.arctan2(pick_xy[:, 1], pick_xy[:, 0]))
+  assert (signed_turn > 0).any() and (signed_turn < 0).any()   # swings both left and right
+  assert np.linalg.norm(place_xy - pick_xy, axis=1).min() > 0.30  # spots are at least 30 cm apart
+
+
 def test_window_time_indices():
   time_indices = get_window_time_indices(10, obs_horizon=2, pred_horizon=4, action_horizon=2)
   assert time_indices.shape == (10 - 4 + 2 + 2 - 1, 4)

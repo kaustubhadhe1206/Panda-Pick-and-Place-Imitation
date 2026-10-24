@@ -1,14 +1,18 @@
 """Pick-and-place environment built on MuJoCo Playground's PandaPickCube, run as a batch.
 
 PandaPickCube asks the robot to lift the cube to a point in the air. For this
-project I changed only the target: it is now a spot ON THE TABLE on the other
-side of the workspace, so the robot has to pick the cube up, carry it over,
+project I changed where the cube starts and where it has to go: both are spots
+ON THE TABLE, placed around the robot base so that the arm has to swing
+45-60 degrees (seen from the top) to carry the cube from one to the other, then
 put it down and let go. Everything else (robot, cube, physics, observations,
-actions, cube start positions) is PandaPickCube unchanged.
+actions) is PandaPickCube unchanged.
 
-  cube start:  x = 0.5 +- 0.2 m, y = +-0.2 m (same as PandaPickCube)
-  target:      x = 0.5 +- 0.2 m, |y| in [0.05, 0.2] m on the OPPOSITE side of y = 0
-               from the cube, at the cube's resting height (on the table)
+Layout, measured from the robot base (at the origin) as seen from the top:
+  angle:     both spots are within 60 degrees left/right of straight ahead (+x),
+             and the angle between them (the "turn") is 45-60 degrees, either direction
+  distance:  both spots are 0.40-0.60 m from the base (comfortable reach for a
+             top-down grasp; the Panda can reach about 0.85 m)
+  height:    the cube's resting height on the table
 
 Each episode starts from env.reset(jax.random.PRNGKey(seed)), so any episode
 can be reproduced from its seed number alone. JAX/MuJoCo are only imported
@@ -18,9 +22,42 @@ inside the functions below, so the other modules can be tested without them.
 import numpy as np
 
 EPISODE_LENGTH = 250        # 5 seconds at 0.02 s per step (pick + carry + place + release)
-TARGET_MIN_ABS_Y = 0.05     # target is at least this far on the other side of y = 0
-TARGET_MAX_ABS_Y = 0.20
-TARGET_X_RANGE = 0.20       # target x = cube's default x +- this
+MIN_TURN_DEG = 45.0         # angle between pick and place spots, seen from the top, around the base
+MAX_TURN_DEG = 60.0
+MAX_ABS_ANGLE_DEG = 60.0    # both spots stay within this angle of straight ahead
+MIN_RADIUS = 0.40           # distance of both spots from the robot base (m)
+MAX_RADIUS = 0.60
+
+
+def pick_and_place_from_uniforms(uniforms, xp=np):
+  """Turn 5 random numbers in [0, 1) into a pick spot and a place spot (x, y), as described above.
+
+  Works with numpy (for tests) and jax.numpy (inside the env); `uniforms` can
+  also have shape (5, N) to make N layouts at once.
+  """
+  # Only +, -, * and xp functions on `uniforms` (numpy functions would break inside jax.jit).
+  degrees_to_radians = np.pi / 180.0
+  turn = (MIN_TURN_DEG + uniforms[0] * (MAX_TURN_DEG - MIN_TURN_DEG)) * degrees_to_radians
+  lowest_angle = -MAX_ABS_ANGLE_DEG * degrees_to_radians
+  highest_first_angle = MAX_ABS_ANGLE_DEG * degrees_to_radians - turn   # so the second spot also stays in range
+  first_angle = lowest_angle + uniforms[1] * (highest_first_angle - lowest_angle)
+  second_angle = first_angle + turn
+  # Randomly pick which of the two spots is the pick spot, so the arm swings left or right.
+  swap = uniforms[2] < 0.5
+  pick_angle = xp.where(swap, second_angle, first_angle)
+  place_angle = xp.where(swap, first_angle, second_angle)
+  pick_radius = MIN_RADIUS + uniforms[3] * (MAX_RADIUS - MIN_RADIUS)
+  place_radius = MIN_RADIUS + uniforms[4] * (MAX_RADIUS - MIN_RADIUS)
+  pick_xy = xp.stack([pick_radius * xp.cos(pick_angle), pick_radius * xp.sin(pick_angle)])
+  place_xy = xp.stack([place_radius * xp.cos(place_angle), place_radius * xp.sin(place_angle)])
+  return pick_xy, place_xy
+
+
+def turn_angle_deg(pick_xy, place_xy):
+  """Angle (degrees) the arm has to swing around its base, seen from the top. Inputs: (..., 2) arrays."""
+  pick_angle = np.arctan2(pick_xy[..., 1], pick_xy[..., 0])
+  place_angle = np.arctan2(place_xy[..., 1], place_xy[..., 0])
+  return np.degrees(np.abs(place_angle - pick_angle))
 
 
 def get_env_config():
@@ -40,20 +77,21 @@ def load_pick_place_env():
   from mujoco_playground._src.manipulation.franka_emika_panda import pick
 
   class PandaPickAndPlace(pick.PandaPickCube):
-    """PandaPickCube, but the target is a spot on the table on the other side of the cube."""
+    """PandaPickCube, but the cube starts and must be placed on spots 45-60 degrees apart around the base."""
 
     def reset(self, random_key):
-      random_key, target_key = jax.random.split(random_key)
-      state = super().reset(random_key)
-      cube_start = state.data.qpos[self._obj_qposadr:self._obj_qposadr + 3]
+      random_key, layout_key = jax.random.split(random_key)
+      state = super().reset(random_key)   # robot at home pose; we then move the cube and the target
 
-      x_key, y_key = jax.random.split(target_key)
-      target_x = self._init_obj_pos[0] + jax.random.uniform(x_key, minval=-TARGET_X_RANGE, maxval=TARGET_X_RANGE)
-      distance_from_middle = jax.random.uniform(y_key, minval=TARGET_MIN_ABS_Y, maxval=TARGET_MAX_ABS_Y)
-      other_side = jnp.where(cube_start[1] >= 0, -1.0, 1.0)
-      target_pos = jnp.array([target_x, other_side * distance_from_middle, cube_start[2]])
+      pick_xy, place_xy = pick_and_place_from_uniforms(jax.random.uniform(layout_key, (5,)), xp=jnp)
+      table_height = self._init_obj_pos[2]   # cube center height when it rests on the table
+      cube_start = jnp.array([pick_xy[0], pick_xy[1], table_height])
+      target_pos = jnp.array([place_xy[0], place_xy[1], table_height])
 
-      data = state.data.replace(mocap_pos=state.data.mocap_pos.at[self._mocap_target, :].set(target_pos))
+      cube_slice = slice(self._obj_qposadr, self._obj_qposadr + 3)
+      data = state.data.replace(
+          qpos=state.data.qpos.at[cube_slice].set(cube_start),
+          mocap_pos=state.data.mocap_pos.at[self._mocap_target, :].set(target_pos))
       info = {**state.info, "target_pos": target_pos}
       # PandaPickCube.reset() never runs forward kinematics, so at step 0 the gripper/cube
       # positions (and those parts of the first observation) would all be zeros.

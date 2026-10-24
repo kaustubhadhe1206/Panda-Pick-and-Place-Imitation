@@ -80,6 +80,9 @@ def check_environment(shared):
     sim_state = batched_env.step(sim_state, zero_actions)
     batched_env.to_numpy(sim_state)
   twenty_steps_done = time.time()
+  from hw2.envs import turn_angle_deg
+  turn_angles = turn_angle_deg(env_state["box_pos"][:, :2], env_state["target_pos"][:, :2])
+  spot_radius = np.linalg.norm(np.concatenate([env_state["box_pos"][:, :2], env_state["target_pos"][:, :2]]), axis=1)
   REPORT["env"].update({
       "load_and_reset_compile_s": round(reset_done - start_time, 1),
       "step_compile_s": round(first_step_done - reset_done, 1),
@@ -89,6 +92,11 @@ def check_environment(shared):
       "box_init_example": env_state["box_pos"][0].round(3).tolist(),
       "target_example": env_state["target_pos"][0].round(3).tolist(),
       "grip_init_example": env_state["grip_pos"][0].round(3).tolist(),
+      # Layout check: arm should swing 45-60 degrees, both spots 0.40-0.60 m from the base, on the table.
+      "turn_angle_deg_min_mean_max": [round(float(f(turn_angles)), 1) for f in (np.min, np.mean, np.max)],
+      "spot_radius_m_min_max": [round(float(spot_radius.min()), 3), round(float(spot_radius.max()), 3)],
+      "cube_and_target_height_m": [round(float(env_state["box_pos"][:, 2].mean()), 3),
+                                   round(float(env_state["target_pos"][:, 2].mean()), 3)],
   })
   print({key: REPORT["env"][key] for key in ["load_and_reset_compile_s", "step_compile_s", "batched_step_ms"]})
 
