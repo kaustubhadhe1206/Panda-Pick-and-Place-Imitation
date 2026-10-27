@@ -95,6 +95,7 @@ class ExponentialMovingAverage:
     self.averaged_model = copy.deepcopy(model).eval()
     for param in self.averaged_model.parameters():
       param.requires_grad_(False)
+    self.averaged_params = list(self.averaged_model.parameters())
     self.power = power
     self.max_decay = max_decay
     self.num_updates = 0
@@ -103,8 +104,11 @@ class ExponentialMovingAverage:
   def update(self, model):
     decay = min(self.max_decay, 1.0 - (1.0 + self.num_updates) ** -self.power)
     self.num_updates += 1
-    for averaged_param, param in zip(self.averaged_model.parameters(), model.parameters()):
-      averaged_param.mul_(decay).add_(param.detach(), alpha=1.0 - decay)
+    current_params = [param.detach() for param in model.parameters()]
+    # averaged = decay * averaged + (1 - decay) * current, done for all weight tensors in
+    # one batched GPU call each (one small call per tensor was a big part of the step time).
+    torch._foreach_mul_(self.averaged_params, decay)
+    torch._foreach_add_(self.averaged_params, current_params, alpha=1.0 - decay)
     for averaged_buffer, buffer in zip(self.averaged_model.buffers(), model.buffers()):
       averaged_buffer.copy_(buffer)
 

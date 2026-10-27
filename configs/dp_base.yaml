@@ -21,6 +21,7 @@ train:
   weight_decay: 1.0e-6
   warmup_steps: 500
   ema_power: 0.75
+  use_amp: false                       # fp16 mixed precision (faster on T4); check code/benchmark_training.py
   log_every: 100
   save_every: 2000                     # resumable training state (runs/<run>/train_state.pt)
 eval:

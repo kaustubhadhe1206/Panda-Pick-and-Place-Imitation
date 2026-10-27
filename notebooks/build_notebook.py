@@ -29,7 +29,7 @@ Every cell only shells out to the scripts in `code/`, so the notebook does exact
 command-line / SLURM workflow does. Steps are **resumable**: finished results are committed to
 GitHub, and re-running a cell skips work that is already done.
 
-**Storage (Colab):** all outputs go to `My Drive/CSCI-645 Homework 2/pick-and-place/`. That covers checkpoints and raw rollouts in `runs/`,
+**Storage (Colab):** all outputs go to `My Drive/CSCI-645 Homework 2/pick-and-place-swing/`. That covers checkpoints and raw rollouts in `runs/`,
 copies of `data/`, `results/` and `videos/`, and a log of every command in `logs/`. A disconnect therefore never
 loses a trained model. Python packages and the git clone live on the VM and are reinstalled each session.
 
@@ -42,7 +42,8 @@ code(r"""
 REPO_URL = "https://github.com/kaustubhadhe1206/Panda-Pick-and-Place-Imitation.git"   # never put a token here
 BRANCH = "main"
 GIT_NAME, GIT_EMAIL = "kashinadhe", "kaustubhadhe@gmail.com"
-DRIVE_FOLDER = "CSCI-645 Homework 2/pick-and-place"   # Colab: all outputs are stored in My Drive/<this folder>
+DRIVE_FOLDER = "CSCI-645 Homework 2/pick-and-place-swing"   # Colab: all outputs are stored in My Drive/<this folder>
+# (the older "pick-and-place" folder holds results from the earlier layout; it is not used anymore)
 
 import os, sys, subprocess, pathlib, shlex
 IN_COLAB = os.path.isdir("/content") and not os.environ.get("SLURM_JOB_ID")
@@ -95,7 +96,7 @@ run_git("log", "--oneline", "-3")
 
 code(r"""
 # ---- 1b. Google Drive storage (Colab only) --------------------------------------------------
-# My Drive/CSCI-645 Homework 2/pick-and-place/
+# My Drive/CSCI-645 Homework 2/pick-and-place-swing/
 #   runs/      checkpoints + raw rollouts (repo's runs/ is a symlink here, so they survive disconnects)
 #   data/ results/ videos/   copies of everything the pipeline produces (refreshed after each step)
 #   logs/      full console output of every pipeline command
@@ -138,6 +139,8 @@ code(r"""
 # ---- 2. Install (Colab only; CARC uses the venv built by slurm/setup_carc.sh) ----------------
 if IN_COLAB:
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"], check=True)
+    # Note: later, JAX may print "PJRT_Api already exists for device type cuda". That is harmless:
+    # Colab already ships a JAX CUDA plugin and pip adds a second copy; JAX just uses the first one.
     # EGL vendor file for headless MuJoCo rendering on Colab GPUs (as in the Playground notebooks).
     egl_vendor_file = "/usr/share/glvnd/egl_vendor.d/10_nvidia.json"
     if not os.path.exists(egl_vendor_file):
@@ -192,6 +195,16 @@ To tune the expert, re-run with overrides, e.g.
 code(r"""
 run_command("python tests/test_cpu.py")
 run_command("python code/smoke_test.py")
+""")
+
+md(r"""
+## Training speed benchmark (~2 min)
+Compares the speed settings on this GPU (random data, no simulator). **Paste the `TRAINING SPEED` block back.**
+If fp16 is much faster, we turn it on for the *whole* sweep with `EXTRA_SETTINGS` below (never for only some runs).
+""")
+
+code(r"""
+run_command("python code/benchmark_training.py")
 """)
 
 code(r"""
@@ -251,8 +264,11 @@ continues from its last saved step.
 """)
 
 code(r"""
-run_command("python code/run_sweep.py --dry-run")
-run_command("python code/run_sweep.py --push")
+# Settings applied to EVERY run of the sweep, e.g. "--set train.use_amp=true" or "--set train.num_steps=10000".
+# Decide before the first run and do not change them halfway, so all runs stay comparable.
+EXTRA_SETTINGS = ""
+run_command(f"python code/run_sweep.py --dry-run {EXTRA_SETTINGS}")
+run_command(f"python code/run_sweep.py --push {EXTRA_SETTINGS}")
 """)
 
 md(r"""

@@ -23,6 +23,7 @@ code/
   collect_demos.py     Part 1: scripted-expert demonstrations -> data/demos_<name>.npz
   inspect_demos.py     Part 1: dataset statistics, figures, demo videos
   train.py             Part 2: Diffusion Policy training (resumable)
+  benchmark_training.py  training speed of different settings on this GPU
   evaluate.py          Part 4: held-out evaluation of a student (or the teacher)
   run_sweep.py         Part 3: train + evaluate all (condition, seed) runs, resumable
   analyze.py           Part 4: results table + comparison figures
@@ -45,7 +46,7 @@ All steps run on **one** GPU platform per sweep (Colab or CARC). Every script ta
 ### Option 1: Google Colab (T4)
 Open `notebooks/run_pipeline.ipynb` and run the cells in order. The notebook clones this repo,
 installs `requirements.txt`, and runs the pipeline below. Every output (checkpoints, data, results,
-videos, logs) is saved to `My Drive/CSCI-645 Homework 2/pick-and-place/`. Interrupted training
+videos, logs) is saved to `My Drive/CSCI-645 Homework 2/pick-and-place-swing/`. Interrupted training
 continues from its last saved step.
 
 ### Option 2: USC CARC Discovery
@@ -60,6 +61,7 @@ sbatch slurm/run_pipeline.sbatch
 ```bash
 python tests/test_cpu.py                                  # unit tests
 python code/smoke_test.py                                 # env sizes, expert success, render, speed
+python code/benchmark_training.py                         # training speed settings on this GPU
 python code/collect_demos.py                              # 100 successful demos (seeds 0, 1, ...)
 python code/inspect_demos.py                              # stats, figures, expert videos
 python code/evaluate.py --teacher --out-dir results/teacher_eval --video-dir videos/teacher_eval

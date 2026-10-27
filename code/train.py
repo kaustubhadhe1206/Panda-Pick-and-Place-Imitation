@@ -58,8 +58,8 @@ def settings_that_must_match(config):
   """If any of these changed, an old train_state.pt can't be continued."""
   train_config = config["train"]
   return (config["seed"], config["data"], config["policy"],
-          {key: train_config[key] for key in ["num_steps", "batch_size", "lr", "weight_decay",
-                                              "warmup_steps", "ema_power"]})
+          {key: train_config.get(key) for key in ["num_steps", "batch_size", "lr", "weight_decay",
+                                                  "warmup_steps", "ema_power", "use_amp"]})
 
 
 def train(config, run_dir, stop_after=None, device=None):
@@ -71,6 +71,11 @@ def train(config, run_dir, stop_after=None, device=None):
     device = "cuda" if torch.cuda.is_available() else "cpu"
   device = torch.device(device)
   policy_config, train_config = config["policy"], config["train"]
+  on_gpu = device.type == "cuda"
+  # Let cuDNN try its convolution algorithms once and keep the fastest (same math, faster on GPU).
+  torch.backends.cudnn.benchmark = on_gpu
+  # Optional fp16 mixed precision (faster on T4 tensor cores). Off by default; see benchmark_training.py.
+  use_amp = bool(train_config.get("use_amp", False)) and on_gpu
 
   # --- data ---
   demos = load_demonstrations(utils.repo_path(config["data"]["path"]), config["data"]["num_demos"])
@@ -93,8 +98,11 @@ def train(config, run_dir, stop_after=None, device=None):
   num_parameters = sum(param.numel() for param in policy.parameters())
   print(f"policy parameters: {num_parameters / 1e6:.2f} M", flush=True)
 
+  # fused=True does the whole AdamW update in one GPU kernel (same algorithm, much fewer kernel launches).
   optimizer = torch.optim.AdamW(policy.parameters(), lr=train_config["lr"],
-                                weight_decay=train_config["weight_decay"])
+                                weight_decay=train_config["weight_decay"], fused=on_gpu)
+  # Scales the loss so small fp16 gradients don't round to zero; does nothing when use_amp is off.
+  grad_scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
   lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
       optimizer, warmup_then_cosine(train_config["warmup_steps"], train_config["num_steps"]))
   # All the randomness in training (which windows, which noise, which diffusion step) comes from this.
@@ -114,6 +122,8 @@ def train(config, run_dir, stop_after=None, device=None):
     optimizer.load_state_dict(saved_state["optimizer"])
     lr_scheduler.load_state_dict(saved_state["lr_scheduler"])
     rng.set_state(saved_state["rng"].cpu())
+    if "grad_scaler" in saved_state:
+      grad_scaler.load_state_dict(saved_state["grad_scaler"])
     start_step = saved_state["step"]
     loss_rows = saved_state["loss_rows"]
     seconds_before = saved_state["elapsed_s"]
@@ -126,6 +136,7 @@ def train(config, run_dir, stop_after=None, device=None):
         "policy": policy.state_dict(), "ema": ema.averaged_model.state_dict(),
         "ema_num_updates": ema.num_updates, "optimizer": optimizer.state_dict(),
         "lr_scheduler": lr_scheduler.state_dict(), "rng": rng.get_state(),
+        "grad_scaler": grad_scaler.state_dict(),
     }, state_path)
 
   # --- training loop ---
@@ -136,10 +147,12 @@ def train(config, run_dir, stop_after=None, device=None):
   policy.train()
   for step in range(start_step + 1, num_steps + 1):
     batch_ids = torch.randint(0, num_windows, (train_config["batch_size"],), device=device, generator=rng)
-    loss = policy.compute_loss(normalized_obs[batch_ids], normalized_actions[batch_ids], generator=rng)
+    with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
+      loss = policy.compute_loss(normalized_obs[batch_ids], normalized_actions[batch_ids], generator=rng)
     optimizer.zero_grad(set_to_none=True)
-    loss.backward()
-    optimizer.step()
+    grad_scaler.scale(loss).backward()
+    grad_scaler.step(optimizer)
+    grad_scaler.update()
     lr_scheduler.step()
     ema.update(policy)
     recent_losses.append(loss.detach())   # .item() every step would slow down the GPU

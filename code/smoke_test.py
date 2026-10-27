@@ -182,7 +182,9 @@ def check_training_speed(shared):
   device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
   obs_dim = REPORT.get("env", {}).get("obs_dim", 66)
   policy = DiffusionPolicy(obs_dim=obs_dim, action_dim=8, **policy_config).to(device)
-  optimizer = torch.optim.AdamW(policy.parameters(), lr=1e-4)
+  # Same speed settings as train.py (see benchmark_training.py for a full comparison).
+  torch.backends.cudnn.benchmark = device.type == "cuda"
+  optimizer = torch.optim.AdamW(policy.parameters(), lr=1e-4, fused=device.type == "cuda")
   batch_size = train_config["batch_size"]
   fake_obs = torch.rand(batch_size, policy_config["obs_horizon"], obs_dim, device=device) * 2 - 1
   fake_actions = torch.rand(batch_size, policy_config["pred_horizon"], 8, device=device) * 2 - 1
