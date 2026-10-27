@@ -74,7 +74,12 @@ def load_pick_place_env():
   import jax
   import jax.numpy as jnp
   from mujoco import mjx
+  from mujoco_playground._src import mjx_env
   from mujoco_playground._src.manipulation.franka_emika_panda import pick
+
+  # The Panda model files come from MuJoCo Menagerie, which Playground downloads on first use.
+  # registry.load() does this for us, but we create the env class directly, so do it here.
+  mjx_env.ensure_menagerie_exists()
 
   class PandaPickAndPlace(pick.PandaPickCube):
     """PandaPickCube, but the cube starts and must be placed on spots 45-60 degrees apart around the base."""
