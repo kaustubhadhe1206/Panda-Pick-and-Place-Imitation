@@ -1,6 +1,9 @@
 """Generates notebooks/run_pipeline.ipynb (keeps the notebook diff-able as Python).
 
   python notebooks/build_notebook.py
+
+Saved outputs are kept: a code cell whose source is unchanged keeps the outputs it
+has in the existing notebook, so regenerating never throws away results.
 """
 
 import json
@@ -21,20 +24,39 @@ def code(text):
 md(r"""
 # CSCI 645 HW2: Imitation learning for robot pick-and-place (Diffusion Policy)
 
-One notebook, two platforms. Run it **either** on Google Colab (T4) **or** on a CARC GPU node
-(OnDemand JupyterLab with the `Python (hw2)` kernel from `slurm/setup_carc.sh`). Never mix
-platforms inside one sweep, because GPU simulation differs slightly across GPU types.
+The saved outputs in this notebook are from the run used in the report (Google Colab, one T4 GPU).
 
-Every cell only shells out to the scripts in `code/`, so the notebook does exactly what the
-command-line / SLURM workflow does. Steps are **resumable**: finished results are committed to
-GitHub, and re-running a cell skips work that is already done.
+Run it **either** on Google Colab (T4) **or** on a CARC GPU node (OnDemand JupyterLab with the
+`Python (hw2)` kernel from `slurm/setup_carc.sh`). Don't mix platforms inside one sweep, because
+GPU simulation differs slightly across GPU types.
+
+Every cell only calls the scripts in `code/`, so the notebook does exactly what the command-line /
+SLURM workflow does. Steps are **resumable**: re-running a cell skips work that is already done.
+
+| Section | What it does | Homework part |
+|---|---|---|
+| 0. Setup | settings, clone, Google Drive, install | – |
+| 1. Checks | unit tests, smoke test, training-speed benchmark | – |
+| 2. Demonstrations | collect 100 expert demos; statistics, figures, videos | Part 1 |
+| 3. Teacher evaluation | expert on the 100 held-out test seeds | Parts 1, 4 |
+| 4. Sanity check (optional) | overfit 5 demos | – |
+| 5. Training sweep | 100 / 50 / 25 demos × 3 seeds: train + evaluate | Parts 2–3 |
+| 6. Results | baseline vs. ablation table and comparison figures | Part 4 |
+| 7. Failure analysis | layout coverage and rollout frames (CPU only) | Part 4 |
+| 8. Save code edits | commit edits made on the runtime | – |
 
 **Storage (Colab):** all outputs go to `My Drive/CSCI-645 Homework 2/pick-and-place-swing/`. That covers checkpoints and raw rollouts in `runs/`,
 copies of `data/`, `results/` and `videos/`, and a log of every command in `logs/`. A disconnect therefore never
 loses a trained model. Python packages and the git clone live on the VM and are reinstalled each session.
 
 **Rules for edits:** change behaviour through `--set key=value` overrides where possible. If you
-edit a `.py` file on the runtime, commit + push it (last cell) before the session ends.
+edit a `.py` file on the runtime, commit + push it (section 8) before the session ends.
+""")
+
+md(r"""
+## 0. Setup (run every session)
+Settings, clone / pull the repo, mount Google Drive and install packages. The clone cell asks for an
+optional GitHub token, only needed to push results back to the repo (press Enter to skip).
 """)
 
 code(r"""
@@ -185,10 +207,11 @@ from IPython.display import Image, Video, display, Markdown
 """)
 
 md(r"""
-## Smoke test
-Versions, GPU, environment dimensions, expert success on 50 seeds, a rendered video and
-training-speed estimates. **Paste the final `SMOKE TEST REPORT` block back to Claude.**
-To tune the expert, re-run with overrides, e.g.
+## 1. Checks
+### Unit tests and smoke test
+CPU unit tests, then versions, GPU, environment sizes, expert success on 50 seeds, a rendered video
+and a speed estimate (summarized in the final `SMOKE TEST REPORT` block). To tune the expert, re-run
+with overrides, e.g.
 `run_command("python code/smoke_test.py --checks env expert render --set expert.approach_speed=0.025")`.
 """)
 
@@ -198,13 +221,19 @@ run_command("python code/smoke_test.py")
 """)
 
 md(r"""
-## Training speed benchmark (~2 min)
-Compares the speed settings on this GPU (random data, no simulator). **Paste the `TRAINING SPEED` block back.**
-If fp16 is much faster, we turn it on for the *whole* sweep with `EXTRA_SETTINGS` below (never for only some runs).
+### Training speed benchmark (~2 min)
+Compares speed settings on this GPU (random data, no simulator), summarized in the `TRAINING SPEED`
+block. All runs in the report use the default fp32. A different setting must be used for the *whole*
+sweep (`EXTRA_SETTINGS` in section 5), never for only some runs.
 """)
 
 code(r"""
 run_command("python code/benchmark_training.py")
+""")
+
+md(r"""
+### Smoke-test videos
+Expert videos rendered by the smoke test above.
 """)
 
 code(r"""
@@ -214,8 +243,10 @@ for video_path in ["videos/smoke/expert_smoke.mp4", "videos/smoke/expert_smoke_f
 """)
 
 md(r"""
-## Part 1: Collect and inspect demonstrations
-Skipped automatically if `data/demos_baseline.npz` is already in the repo (set `FORCE = True` to recollect).
+## 2. Demonstrations (Part 1)
+Collects 100 successful expert demos (env seeds 0–99), then makes the statistics, figures and videos
+used in report Q1–Q2. Collection is skipped if `data/demos_baseline.npz` already exists (set
+`FORCE = True` to collect again).
 """)
 
 code(r"""
@@ -232,7 +263,9 @@ save_and_push(["data/demos_baseline.npz", "results/demos", "videos/expert"], "de
 """)
 
 md(r"""
-## Teacher evaluation on the held-out evaluation seeds
+## 3. Teacher evaluation
+Runs the expert on the 100 held-out test seeds (100000–100099), the same seeds every student is
+tested on.
 """)
 
 code(r"""
@@ -242,7 +275,7 @@ save_and_push(["results/teacher_eval", "videos/teacher_eval"], "results: teacher
 """)
 
 md(r"""
-## (Optional) Overfitting sanity check
+## 4. Sanity check (optional)
 Train on 5 demos and evaluate **on those same 5 seeds**. Near-perfect success here means the
 data -> training -> execution path is wired correctly. Not part of the reported results.
 """)
@@ -255,12 +288,12 @@ if RUN_SANITY:
 """)
 
 md(r"""
-## Parts 2-3: Train + evaluate the dataset-size sweep (resumable)
-Runs `configs/sweep.yaml` (100 / 50 / 25 demos x seeds 0, 1, 2). Each finished run is copied to
-Drive and pushed to GitHub immediately. Training writes a resumable state to Drive every 2000 steps
-(`runs/<run>/train_state.pt`), and a finished run's checkpoint is never retrained. If the session dies,
-reconnect, run cells 0-2 (incl. 1b), then this cell again: finished runs are skipped, and the interrupted run
-continues from its last saved step.
+## 5. Training sweep (Parts 2–3, resumable)
+Runs `configs/sweep.yaml` (100 / 50 / 25 demos x seeds 0, 1, 2): train, then evaluate on the 100
+test seeds. Each finished run is copied to Drive (and pushed to GitHub if a token was given).
+Training saves a resumable state to Drive every 2000 steps (`runs/<run>/train_state.pt`), and a
+finished run is never retrained. If the session dies, reconnect, run section 0, then this cell
+again: finished runs are skipped and the interrupted run continues from its last saved step.
 """)
 
 code(r"""
@@ -272,7 +305,9 @@ run_command(f"python code/run_sweep.py --push {EXTRA_SETTINGS}")
 """)
 
 md(r"""
-## Part 4: Aggregate, plot, push
+## 6. Results (Part 4)
+The baseline vs. ablation table, then success vs. number of demos, success vs. distance threshold,
+failure modes, training loss and action smoothness.
 """)
 
 code(r"""
@@ -282,6 +317,29 @@ for figure_name in ["fig_success_vs_demos", "fig_success_vs_threshold", "fig_fai
                     "fig_loss_curves", "fig_smoothness"]:
     display(Image(str(REPO / f"results/{figure_name}.png")))
 save_and_push(["results", "videos"], "results: aggregate tables and figures")
+""")
+
+md(r"""
+## 7. Failure analysis (Part 4)
+Success vs. distance from each test layout to the closest training demo (`code/analyze_coverage.py`,
+report Figure 9) and frames from student rollout videos (`code/make_rollout_figure.py`, report
+Figure 6). CPU only, a few seconds; needs the results and videos from section 5.
+
+*In the saved notebook, this cell's outputs come from running it on a laptop CPU after the Colab
+session, using the same result files.*
+""")
+
+code(r"""
+run_command("python code/analyze_coverage.py")
+run_command("python code/make_rollout_figure.py")
+for figure_name in ["fig_coverage", "fig_student_rollouts"]:
+    display(Image(str(REPO / f"results/{figure_name}.png")))
+save_and_push(["results"], "results: failure analysis figures")
+""")
+
+md(r"""
+## 8. Save code edits
+If you edited `.py` files on the runtime, review the changes and commit them before the session ends.
 """)
 
 code(r"""
@@ -299,6 +357,20 @@ notebook = {
 for index, cell in enumerate(notebook["cells"]):
   cell["id"] = f"cell-{index:02d}"
 notebook_path = Path(__file__).with_name("run_pipeline.ipynb")
+
+# Keep the saved outputs (and notebook metadata) of the existing notebook for unchanged code cells.
+if notebook_path.exists():
+  with open(notebook_path, encoding="utf-8") as f:
+    old_notebook = json.load(f)
+  notebook["metadata"] = {**notebook["metadata"], **old_notebook["metadata"]}
+  old_code_cells = {"".join(cell["source"]): cell for cell in old_notebook["cells"] if cell["cell_type"] == "code"}
+  for cell in cells:
+    old_cell = old_code_cells.get("".join(cell["source"])) if cell["cell_type"] == "code" else None
+    if old_cell is not None:
+      cell["outputs"] = old_cell.get("outputs", [])
+      cell["execution_count"] = old_cell.get("execution_count")
+      cell["metadata"] = old_cell.get("metadata", {})
+
 with open(notebook_path, "w", newline="\n") as f:
   json.dump(notebook, f, indent=1)
 print(f"wrote {notebook_path} ({len(cells)} cells)")
