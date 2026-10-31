@@ -15,8 +15,10 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 uv venv --python 3.12 "$VENV"
 source "$VENV/bin/activate"
-# One resolve for everything so torch's and jax's CUDA 12 libraries agree.
-uv pip install -r requirements.txt torch ipykernel
+# One resolve for everything so torch's and jax's CUDA 12 libraries agree. The default PyPI
+# torch wheel is built for CUDA 13, so take the CUDA 12.6 build (same torch version as on Colab).
+uv pip install -r requirements.txt torch==2.11.0 ipykernel \
+  --extra-index-url https://download.pytorch.org/whl/cu126 --index-strategy unsafe-best-match
 python -m ipykernel install --user --name hw2 --display-name "Python (hw2)"
 
 JAX_PLATFORMS=cpu python -c "

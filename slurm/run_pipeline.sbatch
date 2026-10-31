@@ -27,4 +27,7 @@ python code/inspect_demos.py
 [ -f results/teacher_eval/eval_summary.json ] || python code/evaluate.py --teacher --out-dir results/teacher_eval
 python code/run_sweep.py
 python code/analyze.py
+python code/analyze_coverage.py
+# The report's frames come from specific episodes; a new run may label them differently.
+python code/make_rollout_figure.py || echo "make_rollout_figure.py skipped: edit ROWS to match videos/student/"
 echo "Pipeline finished. Commit and push results/ and videos/ from a login node."

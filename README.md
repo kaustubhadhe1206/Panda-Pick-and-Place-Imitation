@@ -47,13 +47,16 @@ All steps run on **one** GPU platform per sweep (Colab or CARC). Every script ta
 `--set key=value` overrides on top of its YAML config.
 
 ### Option 1: Google Colab (T4)
-Open `notebooks/run_pipeline.ipynb` and run the cells in order. The notebook clones this repo,
-installs `requirements.txt`, and runs the pipeline below. Every output (checkpoints, data, results,
+Open `notebooks/run_pipeline.ipynb` and run the cells in order. The notebook does not need any
+code uploaded: it clones this public repo
+(https://github.com/kaustubhadhe1206/Panda-Pick-and-Place-Imitation, no token needed), installs
+`requirements.txt`, and then runs the whole pipeline below (tests, demos, training, evaluation, plots). Every output (checkpoints, data, results,
 videos, logs) is saved to `My Drive/CSCI-645 Homework 2/pick-and-place-swing/`. Interrupted training
 continues from its last saved step.
 
 ### Option 2: USC CARC Discovery
 ```bash
+git clone https://github.com/kaustubhadhe1206/Panda-Pick-and-Place-Imitation.git && cd Panda-Pick-and-Place-Imitation
 bash slurm/setup_carc.sh                     # on a login node, once (uv venv + kernel + assets)
 # Either open notebooks/run_pipeline.ipynb in OnDemand JupyterLab with the "Python (hw2)" kernel,
 # or run unattended:
